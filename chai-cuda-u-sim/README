@@ -1,0 +1,101 @@
+# Chai
+
+v1.0-alpha
+
+## Overview
+
+Chai is a benchmark suite of Collaborative Heterogeneous Applications for Integrated-architectures. The Chai benchmarks are designed to use the latest features of heterogeneous architectures such as shared virtual memory and system-wide atomics to achieve efficient simultaneous collaboration between host and accelerator devices.
+
+Each benchmark has multiple implementations. This release includes the OpenCL-D, OpenCL-U, CUDA-D, CUDA-U, CUDA-D-Sim, and CUDA-U-Sim implementations. The C++AMP implementations are underway. If you would like early access to premature versions, please contact us.
+
+## Instructions
+
+Clone the repository:
+
+  ```
+  git clone https://github.com/chai-benchmarks/chai.git
+  cd chai
+  ```
+
+Export environment variables:
+
+  ```
+  export CHAI_OCL_LIB=<path/to/OpenCL/lib>
+  export CHAI_OCL_INC=<path/to/OpenCL/include>
+  ```
+
+Select desired implementation:
+
+  ```
+  cd OpenCL-U
+  ```
+
+Select desired benchmark:
+
+  ```
+  cd BFS
+  ```
+
+Compile:
+
+  ```
+  make
+  ```
+
+Execute:
+
+  ```
+  ./bfs
+  ```
+
+For help instructions:
+
+  ```
+  ./bfs -h
+  ```
+
+## Citation
+
+Please cite the following paper if you find our benchmark suite useful:
+
+* J. Gómez-Luna, I. El Hajj, L.-W. Chang, V. Garcia-Flores, S. Garcia de Gonzalo, T. Jablin, A. J. Peña, W.-M. Hwu.
+  **Chai: Collaborative Heterogeneous Applications for Integrated-architectures.**
+  In *Proceedings of IEEE International Symposium on Performance Analysis of Systems and Software (ISPASS)*, 2017.
+  [\[bibtex\]](https://chai-benchmarks.github.io/assets/ispass17.bib)
+
+
+
+# Notes on gem5-gpu versions (CUDA-U-Sim and CUDA-D-Sim)
+
+These workload only work in FS mode since they use pthreads.
+
+It may be possible to run these in SE mode with more recent versions of gem5,
+but this isn't supported in gem5-gpu right now (4/2017).
+
+The inluded dockerfile will create a docker container with everything needed
+to compile these workloads.
+This dockerfile was used to generate the following container on dockerhub.
+https://hub.docker.com/r/powerjg/gem5-cuda-build/
+
+If you're unfamiliar with docker, you can run the following command to load the
+docker container:
+$ docker run -v `pwd`:/gem5-gpu -it powerjg/gem5-cuda-build /bin/bash
+
+Then, you can cd /gem5-gpu and be in the same directory as you ran docker,
+assuming you ran docker in your gem5-gpu directory. From here you can just
+compile and run the benchmarks as normal.
+
+To build your own container from the dockerfile, use the following command.
+Run this command in the chai directory.
+$ docker build -t gem5-cuda-build .
+
+
+# Known issues with gem5-gpu versions of Chai
+
+- BS split version fails validation.
+
+- PAD, both split and fusion versions run but fail validation. Likely a problem with CPU-GPU atomic synchronization.
+
+- TQ both split and fusion versions work and pass validation, but two free() at the end of the benchmarks have to be commented or the benchmarks crash with a "double free or corruption error". This is also weird as it works in real machines. Ran them through cuda-memcheck and they seem to be fine.
+
+- CEDD and CEDT, in both the fusion version works well and passes validation. The split version crashes right at the beginning with a  "panic: vtophys page walk returned fault" error.
