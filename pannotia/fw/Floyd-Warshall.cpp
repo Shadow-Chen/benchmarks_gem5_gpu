@@ -74,10 +74,10 @@ void m5_work_end(uint64_t workid, uint64_t threadid);
 
 /*#ifdef GEM5_FUSION
 #define MAX_ITERS 128
-#else
+#else*/
 #include <stdint.h>
 #define MAX_ITERS INT32_MAX
-#endif*/
+//#endif
 
 #define BIGNUM 999999
 #define TRUE 1
@@ -110,6 +110,7 @@ int main(int argc, char **argv)
     // Parse the adjacency matrix
     int *adjmatrix = parse_graph_file(&num_nodes, &num_edges, tmpchar);
     int dim = num_nodes;
+    printf("problem dim %d\n",dim);
 
     // Initialize the distance matrix
     int *distmatrix = (int *)malloc(dim * dim * sizeof(int));
@@ -142,22 +143,26 @@ int main(int argc, char **argv)
     memcpy(dist, distmatrix, sizeof(int)*dim*dim);
     int *next = (int*)malloc(sizeof(int) * dim * dim);
 
+    printf("%p\n", (void*)dist);
+    printf("%p\n", (void*)distmatrix);
+    printf("%p\n", (void*)result);
+   
 #ifdef GEM5_FUSION
     m5_work_begin(0, 0);
 #endif
 
     //int num_threads = (num_nodes > 16) ? 16 : num_nodes;
-    int num_threads_per_dim = 512; //1024;
-    int num_wgs = 128; //(num_nodes * num_nodes) / num_threads_per_dim;
+    //int num_threads_per_dim = 512; //1024;
+    //int num_wgs = 128; //(num_nodes * num_nodes) / num_threads_per_dim;
     //dim3 threads(num_threads, num_threads, 1);
     //dim3 grid(grid_size, grid_size, 1);
-    printf("threads %d wgs %d\n", num_threads_per_dim, num_wgs);
+    //printf("threads %d wgs %d\n", num_threads_per_dim, num_wgs);
     dim3 threads(16,16,1); //num_threads_per_dim);
     dim3 grid(16,16,1); //num_wgs);
 
     // Main computation loop
     //for (int k = 0; k < dim && k < MAX_ITERS; k++) {
-    for (int k = 0; k < 1; k++) {
+    for (int k = 0; k < dim; k++) {
     	hipLaunchKernelGGL(HIP_KERNEL_NAME(floydwarshall), grid, threads, 0, 0, distmatrix, next, dim, k);
     }
     //hipDeviceSynchronize();
