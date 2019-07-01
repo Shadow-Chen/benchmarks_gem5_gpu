@@ -56,10 +56,12 @@
  *                                                                                  *
 \************************************************************************************/
 
+#include <cuda.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
+//#include <sys/time.h>
+//#include <omp.h>
 #include "../graph_parser/util.h"
 #include "kernel.h"
 #include "parse.h"
@@ -72,16 +74,23 @@ void m5_work_end(uint64_t workid, uint64_t threadid);
 }
 #endif
 
-/*#ifdef GEM5_FUSION
-#define MAX_ITERS 128
-#else*/
+#ifdef GEM5_FUSION
+#define MAX_ITERS 192
+#else
+#define __STDC_LIMIT_MACROS
 #include <stdint.h>
 #define MAX_ITERS INT32_MAX
-//#endif
+#endif
 
 #define BIGNUM 999999
 #define TRUE 1
 #define FALSE 0
+
+#define hipDeviceSynchronize() {;}
+#define hipMemcpy(dst, src, count, copy_dir) ({ memcpy(dst, src, count); hipSuccess; })
+#define hipMalloc(dst,size) ({int *ptr = (int*)malloc(size); *dst = ptr; hipSuccess;})
+#define hipFree(ptr) {free(ptr);}
+
 
 int main(int argc, char **argv)
 {
@@ -110,14 +119,10 @@ int main(int argc, char **argv)
     // Parse the adjacency matrix
     int *adjmatrix = parse_graph_file(&num_nodes, &num_edges, tmpchar);
     int dim = num_nodes;
-    printf("problem dim %d\n",dim);
 
     // Initialize the distance matrix
     int *distmatrix = (int *)malloc(dim * dim * sizeof(int));
     if (!distmatrix) fprintf(stderr, "malloc failed - distmatrix\n");
-
-    int *dist = (int *)malloc(dim * dim * sizeof(int));
-    if (!dist) fprintf(stderr, "malloc failed - distmatrix\n");
 
     // Initialize the result matrix
     int *result = (int *)malloc(dim * dim * sizeof(int));
@@ -140,42 +145,65 @@ int main(int argc, char **argv)
         }
     }
 
-    memcpy(dist, distmatrix, sizeof(int)*dim*dim);
-    int *next = (int*)malloc(sizeof(int) * dim * dim);
+    int *dist_d;
+    int *next_d;
 
-    printf("%p\n", (void*)dist);
-    printf("%p\n", (void*)distmatrix);
-    printf("%p\n", (void*)result);
-   
+    // Create device-side FW buffers
+    err = hipMalloc(&dist_d, dim * dim * sizeof(int));
+    if (err != hipSuccess) {
+        printf("ERROR: hipMalloc dist_d (size:%d) => %d\n",  dim * dim , err);
+        return -1;
+    }
+    err = hipMalloc(&next_d, dim * dim * sizeof(int));
+    if (err != hipSuccess) {
+        printf("ERROR: hipMalloc next_d (size:%d) => %d\n",  dim * dim , err);
+        return -1;
+    }
+
+//    double timer1 = gettime();
+
 #ifdef GEM5_FUSION
     m5_work_begin(0, 0);
 #endif
 
-    //int num_threads = (num_nodes > 16) ? 16 : num_nodes;
-    //int num_threads_per_dim = 512; //1024;
-    //int num_wgs = 128; //(num_nodes * num_nodes) / num_threads_per_dim;
-    //dim3 threads(num_threads, num_threads, 1);
-    //dim3 grid(grid_size, grid_size, 1);
-    //printf("threads %d wgs %d\n", num_threads_per_dim, num_wgs);
-    dim3 threads(16,16,1); //num_threads_per_dim);
-    dim3 grid(16,16,1); //num_wgs);
-
-    // Main computation loop
-    //for (int k = 0; k < dim && k < MAX_ITERS; k++) {
-    for (int k = 0; k < dim; k++) {
-    	hipLaunchKernelGGL(HIP_KERNEL_NAME(floydwarshall), grid, threads, 0, 0, distmatrix, next, dim, k);
+    // Copy the dist matrix to the device
+    err = hipMemcpy(dist_d, distmatrix, dim * dim * sizeof(int), hipMemcpyHostToDevice);
+    if (err != hipSuccess) {
+        fprintf(stderr, "ERROR: hipMemcpy feature_d (size:%d) => %d\n", dim * dim, err);
+        return -1;
     }
-    //hipDeviceSynchronize();
+
+    // Work dimension
+    dim3 threads(16, 16, 1);
+    dim3 grid(num_nodes / 16, num_nodes / 16, 1);
+
+//    double timer3 = gettime();
+    // Main computation loop
+    for (int k = 1; k < dim && k < MAX_ITERS; k++) {
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(floydwarshall), dim3(grid), dim3(threads), 0, 0, dist_d, next_d, dim, k);
+    }
+    hipDeviceSynchronize();
+
+//    double timer4 = gettime();
+    err = hipMemcpy(result, dist_d, dim * dim * sizeof(int), hipMemcpyDeviceToHost);
+    if (err != hipSuccess) {
+        fprintf(stderr, "ERROR:  read back dist_d %d failed\n", err);
+        return -1;
+    }
 
 #ifdef GEM5_FUSION
     m5_work_end(0, 0);
 #endif
 
+//    double timer2 = gettime();
+
+//    printf("kernel time = %lf ms\n", (timer4 - timer3) * 1000);
+//    printf("kernel + memcpy time = %lf ms\n", (timer2 - timer1) * 1000);
+
     if (verify_results) {
-	printf("Verifying Results\n");
         // Below is the verification part
         // Calculate on the CPU
-        //int *dist = distmatrix;
+        int *dist = distmatrix;
         for (int k = 0; k < dim; k++) {
             for (int i = 0; i < dim; i++) {
                 for (int j = 0; j < dim; j++) {
@@ -190,8 +218,8 @@ int main(int argc, char **argv)
         bool check_flag = 0;
         for (int i = 0; i < dim; i++) {
             for (int j = 0; j < dim; j++) {
-                if (dist[i * dim + j] !=  distmatrix[i * dim + j]) {
-                    //printf("mismatch at (%d, %d) %d %d\n", i, j, dist[i*dim+j],distmatrix[i*dim+j]);
+                if (dist[i * dim + j] !=  result[i * dim + j]) {
+                    printf("mismatch at (%d, %d)\n", i, j);
                     check_flag = 1;
                 }
             }
@@ -207,8 +235,13 @@ int main(int argc, char **argv)
     printf("Finishing Floyd-Warshall\n");
 
     // Free host-side buffers
-    //free(adjmatrix);
-    //free(distmatrix);
+    free(adjmatrix);
+    free(result);
+    free(distmatrix);
+
+    // Free CUDA buffers
+    hipFree(dist_d);
+    hipFree(next_d);
 
     return 0;
 
