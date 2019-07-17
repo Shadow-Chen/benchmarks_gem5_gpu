@@ -180,7 +180,7 @@ int main(int argc, char **argv)
 //    double timer3 = gettime();
     // Main computation loop
     for (int k = 1; k < dim && k < MAX_ITERS; k++) {
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(floydwarshall), dim3(grid), dim3(threads), 0, 0, dist_d, next_d, dim, k);
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(floydwarshall), grid, threads, 0, 0, dist_d, next_d, dim, k);
     }
     hipDeviceSynchronize();
 
